@@ -93,6 +93,10 @@ s3-optimizer/
 }
 ```
 
+## Tag
+
+'''q-developer-quest-tdc-2025'''
+    
 ## Monitoramento
 
 - **CloudWatch Logs**: `/aws/lambda/s3-optimizer-function`
