@@ -1,0 +1,128 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: 'S3 Orquestrador e Otimizador com Bedrock'
+
+Parameters:
+  BucketName:
+    Type: String
+    Description: Nome do bucket S3 para monitorar
+    Default: my-s3-optimizer-bucket
+  
+
+
+Resources:
+  # Bucket S3 para monitoramento
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref BucketName
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: s3:ObjectCreated:Put
+            Function: !GetAtt S3OptimizerFunction.Arn
+
+  # Tabela DynamoDB para armazenar insights
+  InsightsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: s3-optimizer-insights
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: file_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: file_id
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+
+
+  # Função Lambda
+  S3OptimizerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: s3-optimizer-function
+      CodeUri: ../src/
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.9
+      Timeout: 300
+      MemorySize: 512
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref BucketName
+          DYNAMODB_TABLE: !Ref InsightsTable
+      Role: !GetAtt LambdaExecutionRole.Arn
+
+  # Permissão para S3 invocar Lambda
+  S3InvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref S3OptimizerFunction
+      Action: lambda:InvokeFunction
+      Principal: s3.amazonaws.com
+      SourceArn: !Sub '${S3Bucket}/*'
+
+  # Role IAM para Lambda
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3BedrockDynamoSNSAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:GetObjectTagging
+                  - s3:PutObjectTagging
+                  - s3:HeadObject
+                  - s3:CopyObject
+                Resource: !Sub '${S3Bucket}/*'
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                Resource: !GetAtt InsightsTable.Arn
+
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+
+Outputs:
+  BucketName:
+    Description: Nome do bucket S3 criado
+    Value: !Ref S3Bucket
+    
+  FunctionName:
+    Description: Nome da função Lambda
+    Value: !Ref S3OptimizerFunction
+    
+  FunctionArn:
+    Description: ARN da função Lambda
+    Value: !GetAtt S3OptimizerFunction.Arn
+    
+  DynamoDBTable:
+    Description: Nome da tabela DynamoDB
+    Value: !Ref InsightsTable
+    
